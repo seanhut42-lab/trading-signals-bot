@@ -12,8 +12,8 @@ with warnings.catch_warnings():
     import pandas as pd
 
 # NTFY configuration
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "myleveragebot123")
-NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "LSBot")
+NTFY_URL = f"https://ntfy.sh/{LSBot}"
 
 def send_to_ntfy(message):
     try:
