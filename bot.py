@@ -81,27 +81,23 @@ signals = {key: latest_prices[key.split('_')[0]] > latest_ma[key] if latest_ma[k
 
 days_left = days_to_quarter_end(data.index[-1])
 
-# LS3.0 Implementation Signals
-spy_200 = latest_ma['SPY_200d']
-spy_upper = spy_200 * 1.0175
-spy_lower = spy_200 * 0.9825
+# LS3.0 Implementation Signals (correct logic)
+signal_1 = "On" if latest_prices['SPY'] > spy_upper or latest_prices['SPY'] >= spy_lower else "Off"
+signal_2 = "On" if latest_prices['IEF'] > ief_upper or latest_prices['IEF'] >= ief_lower else "Off"
 
-ief_50 = latest_ma['IEF_50d']
-ief_upper = ief_50 * 1.02
-ief_lower = ief_50 * 0.98
+# Implementable positioning (exact original logic)
+ls3_impl = "3LUS" if signal_1 == "On" and signal_2 == "On" else "Cash"
 
-signal_1 = "✅ On" if latest_prices['SPY'] > spy_upper else "❌ Off" if latest_prices['SPY'] < spy_lower else "⚪ On"
-signal_2 = "✅ On" if latest_prices['IEF'] > ief_upper else "❌ Off" if latest_prices['IEF'] < ief_lower else "⚪ On"
-
-ls3_impl = "3LUS" if signal_1=="✅ On" and signal_2=="✅ On" else "Cash"
+# For pretty display, map signals to emojis
+signal_1_pretty = "✅ On" if signal_1 == "On" else "❌ Off"
+signal_2_pretty = "✅ On" if signal_2 == "On" else "❌ Off"
 
 ls3_message = f"""
 📊 LS3.0 Implementation
 ------------------------
-Signal 1 (SPY ±1.75%): {signal_1}
-Signal 2 (IEF ±2%): {signal_2}
+Signal 1 (SPY 200d MA ±1.75%): {signal_1_pretty}
+Signal 2 (IEF 50d MA ±2%): {signal_2_pretty}
 Positioning: {ls3_impl}
-Days to quarter-end: {days_left}
 """
 
 # LS3.0 Overview
@@ -111,7 +107,6 @@ ls3_overview = f"""
 SPX 200d MA: {'above' if signals['SPY_200d'] else 'below'}
 IEF 50d MA: {'above' if signals['IEF_50d'] else 'below'}
 Positioning: {'3LUS' if signals['SPY_200d'] and signals['IEF_50d'] else '3TYL' if signals['IEF_50d'] and not signals['SPY_200d'] else 'Cash'}
-Days to quarter-end: {days_left}
 """
 
 # LS2.0 Overview
