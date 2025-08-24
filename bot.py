@@ -11,9 +11,9 @@ with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=UserWarning, message="The NumPy module was reloaded")
     import pandas as pd
 
-# NTFY configuration
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "LSBot")
-NTFY_URL = f"https://ntfy.sh/{LSBot}"
+# NTFY configuration (your topic: LSBot)
+NTFY_TOPIC = "LSBot"
+NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
 
 def send_to_ntfy(message):
     try:
