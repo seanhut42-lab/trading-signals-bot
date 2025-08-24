@@ -2,7 +2,7 @@ name: Daily Bot
 
 on:
   schedule:
-    - cron: "0 21 * * *"   # Runs daily at 21:00 UTC (16:00 NY time)
+    - cron: "0 5 * * *"   # Runs daily at 21:00 UTC (16:00 NY time)
   workflow_dispatch:       # Allows manual run from GitHub UI
 
 jobs:
