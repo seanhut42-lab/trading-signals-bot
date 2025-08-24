@@ -1,0 +1,23 @@
+name: Daily Bot
+
+on:
+  schedule:
+    - cron: "0 21 * * *"   # Runs daily at 21:00 UTC (16:00 NY time)
+  workflow_dispatch:       # Allows manual run from GitHub UI
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot
+        run: python bot.py
