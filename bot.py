@@ -2,11 +2,11 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 import requests
+import time
 import warnings
 import os
-import time
 
-# Suppress warnings
+# Suppress NumPy reload warning
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=UserWarning, message="The NumPy module was reloaded")
     import pandas as pd
@@ -74,23 +74,14 @@ moving_averages = {
 }
 
 latest_prices = data.iloc[-1]
-latest_ma = {k: ma.iloc[-1] if ma is not None else None for k, ma in moving_averages.items()}
+latest_ma = {key: ma.iloc[-1] if ma is not None else None for key, ma in moving_averages.items()}
 
-# Signals
-signals = {k: latest_prices[k.split('_')[0]] > latest_ma[k] if latest_ma[k] is not None else False
-           for k in moving_averages.keys() if latest_ma[k] is not None}
+signals = {key: latest_prices[key.split('_')[0]] > latest_ma[key] if latest_ma[key] is not None else False
+           for key in moving_averages.keys() if latest_ma[key] is not None}
 
 days_left = days_to_quarter_end(data.index[-1])
 
-# Utility for emojis
-def signal_emoji(is_on):
-    return "✅ ON" if is_on else "❌ OFF"
-
-def position_emoji(position):
-    mapping = {'3LUS':'🚀 3LUS', 'LQQ3':'🌐 LQQ3', '3TYL':'💵 3TYL', 'Cash':'💤 Cash'}
-    return mapping.get(position, position)
-
-# LS3.0 Implementation signals
+# LS3.0 Implementation Signals
 spy_200 = latest_ma['SPY_200d']
 spy_upper = spy_200 * 1.0175
 spy_lower = spy_200 * 0.9825
@@ -99,19 +90,28 @@ ief_50 = latest_ma['IEF_50d']
 ief_upper = ief_50 * 1.02
 ief_lower = ief_50 * 0.98
 
-sig1 = "✅ ON" if latest_prices['SPY'] > spy_upper else "❌ OFF" if latest_prices['SPY'] < spy_lower else "⚪ ON"
-sig2 = "✅ ON" if latest_prices['IEF'] > ief_upper else "❌ OFF" if latest_prices['IEF'] < ief_lower else "⚪ ON"
-ls3_impl = "3LUS" if sig1=="✅ ON" and sig2=="✅ ON" else "Cash"
+signal_1 = "✅ On" if latest_prices['SPY'] > spy_upper else "❌ Off" if latest_prices['SPY'] < spy_lower else "⚪ On"
+signal_2 = "✅ On" if latest_prices['IEF'] > ief_upper else "❌ Off" if latest_prices['IEF'] < ief_lower else "⚪ On"
+
+ls3_impl = "3LUS" if signal_1=="✅ On" and signal_2=="✅ On" else "Cash"
+
+ls3_message = f"""
+📊 LS3.0 Implementation
+------------------------
+Signal 1 (SPY ±1.75%): {signal_1}
+Signal 2 (IEF ±2%): {signal_2}
+Positioning: {ls3_impl}
+Days to quarter-end: {days_left}
+"""
 
 # LS3.0 Overview
-ls3_message = f"""
+ls3_overview = f"""
 📊 LS3.0: The Last Dance
 ------------------------
 SPX 200d MA: {'above' if signals['SPY_200d'] else 'below'}
 IEF 50d MA: {'above' if signals['IEF_50d'] else 'below'}
-Signal 1 (SPY ±1.75%): {sig1}
-Signal 2 (IEF ±2%): {sig2}
-Positioning: {position_emoji(ls3_impl)}
+Positioning: {'3LUS' if signals['SPY_200d'] and signals['IEF_50d'] else '3TYL' if signals['IEF_50d'] and not signals['SPY_200d'] else 'Cash'}
+Days to quarter-end: {days_left}
 """
 
 # LS2.0 Overview
@@ -131,7 +131,7 @@ ls2_message = f"""
 SPX 200d MA: {'above' if signals['SPY_200d'] else 'below'}
 NDX 220d MA: {'above' if signals['QQQ_220d'] else 'below'}
 IEF 50d MA: {'above' if signals['IEF_50d'] else 'below'}
-Positioning: {', '.join([position_emoji(p) for p in ls2_positions])}
+Positioning: {', '.join(ls2_positions)}
 """
 
 # LS1.0 Overview
@@ -148,7 +148,7 @@ ls1_message = f"""
 ------------------------
 SPX 20w MA: {'above' if signals['SPY_20w'] else 'below'}
 NDX 20w MA: {'above' if signals['QQQ_20w'] else 'below'}
-Positioning: {', '.join([position_emoji(p) for p in ls1_positions])}
+Positioning: {', '.join(ls1_positions)}
 """
 
 # VT overview
@@ -167,11 +167,11 @@ else:
 VT: data unavailable
 """
 
-# Compose full message
-full_message = "\n".join([ls3_message, ls2_message, ls1_message, vt_message, f"Days to quarter-end: {days_left}"])
+# Combine all messages
+full_message = "\n".join([ls3_message, ls3_overview, ls2_message, ls1_message, vt_message])
 
-# Send
+# Send to NTFY
 send_to_ntfy(full_message)
 
-# Print for debug
+# Print for debugging
 print(full_message)
