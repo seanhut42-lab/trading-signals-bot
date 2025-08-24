@@ -106,7 +106,6 @@ ls3_message = f"""
 Signal 1 (SPY 200d MA ±1.75%): {signal_1_pretty}
 Signal 2 (IEF 50d MA ±2%): {signal_2_pretty}
 Positioning: {ls3_impl}
-Days to quarter-end: {days_left}
 """
 
 # LS3.0 Overview
@@ -116,7 +115,6 @@ ls3_overview = f"""
 SPX 200d MA: {'above' if signals['SPY_200d'] else 'below'}
 IEF 50d MA: {'above' if signals['IEF_50d'] else 'below'}
 Positioning: {'3LUS' if signals['SPY_200d'] and signals['IEF_50d'] else '3TYL' if signals['IEF_50d'] and not signals['SPY_200d'] else 'Cash'}
-Days to quarter-end: {days_left}
 """
 
 # LS2.0 Overview
@@ -137,6 +135,7 @@ SPX 200d MA: {'above' if signals['SPY_200d'] else 'below'}
 NDX 220d MA: {'above' if signals['QQQ_220d'] else 'below'}
 IEF 50d MA: {'above' if signals['IEF_50d'] else 'below'}
 Positioning: {', '.join(ls2_positions)}
+Days to quarter-end: {days_left}
 """
 
 # LS1.0 Overview
