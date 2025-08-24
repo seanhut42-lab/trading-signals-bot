@@ -2,72 +2,176 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 import requests
-import uuid
+import warnings
+import os
+import time
 
-# ========= PUSH NOTIFICATIONS ========= #
-def send_to_ntfy(message, topic="LSBot"):  # <-- replace with your topic
-    url = f"https://ntfy.sh/{topic}"
-    headers = {"Title": "Trading Signal"}
-    requests.post(url, data=message.encode("utf-8"), headers=headers)
+# Suppress warnings
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning, message="The NumPy module was reloaded")
+    import pandas as pd
 
-# ========= FETCH DATA ========= #
-def fetch_data(tickers, period="2y"):
+# NTFY configuration
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "myleveragebot123")
+NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
+
+def send_to_ntfy(message):
+    try:
+        requests.post(NTFY_URL, data=message.encode("utf-8"))
+        print("Message sent to ntfy!")
+    except Exception as e:
+        print("Failed to send message:", e)
+
+# Fetch historical data
+def fetch_data(tickers, period='2y', retries=3, delay=2):
+    data_dict = {}
+    failed_tickers = []
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=365*int(period.replace("y", "")))
-    df = yf.download(tickers, start=start_date, end=end_date, progress=False, auto_adjust=True)["Close"]
-    return df
+    start_date = end_date - timedelta(days=int(period.replace('y',''))*365)
+    for ticker in tickers:
+        for attempt in range(retries):
+            try:
+                df = yf.download(ticker, start=start_date, end=end_date, progress=False, auto_adjust=True)
+                if df.empty:
+                    raise ValueError(f"No historical data for {ticker}")
+                df = df[['Close']].rename(columns={'Close': ticker})
+                df.index = pd.to_datetime(df.index)
+                data_dict[ticker] = df[ticker].squeeze().copy()
+                time.sleep(delay)
+                break
+            except Exception as e:
+                if attempt == retries-1:
+                    failed_tickers.append(ticker)
+                time.sleep(delay)
+    if data_dict:
+        df = pd.DataFrame(data_dict)
+        df.index = pd.to_datetime(df.index)
+        df.index.name = "Date"
+        return df, failed_tickers
+    return None, failed_tickers
 
+# Days to next quarter-end
 def days_to_quarter_end(current_date):
-    quarter_ends = [datetime(current_date.year, m, d) for m, d in [(3,31),(6,30),(9,30),(12,31)]]
-    next_quarter = min([q for q in quarter_ends if q >= current_date], default=datetime(current_date.year+1, 3, 31))
-    return (next_quarter - current_date).days
+    quarter_ends = [datetime(current_date.year, m, d) for m,d in [(3,31),(6,30),(9,30),(12,31)]]
+    next_q = min([q for q in quarter_ends if q >= current_date], default=datetime(current_date.year+1,3,31))
+    return (next_q - current_date).days
 
-# ========= MAIN ========= #
-def main():
-    tickers = ["SPY", "QQQ", "IEF", "VT"]
-    data = fetch_data(tickers)
+# Main
+tickers = ['SPY','QQQ','IEF','VT']
+data, failed_tickers = fetch_data(tickers)
+if data is None:
+    send_to_ntfy(f"Error: Could not fetch data for {', '.join(failed_tickers)}")
+    exit()
 
-    latest = data.iloc[-1]
-    date_str = data.index[-1].strftime("%Y-%m-%d")
-    days_left = days_to_quarter_end(data.index[-1])
+# Moving averages
+moving_averages = {
+    'SPY_20w': data['SPY'].rolling(100).mean(),
+    'QQQ_20w': data['QQQ'].rolling(100).mean(),
+    'SPY_200d': data['SPY'].rolling(200).mean(),
+    'QQQ_220d': data['QQQ'].rolling(220).mean(),
+    'IEF_50d': data['IEF'].rolling(50).mean(),
+    'VT_20d': data['VT'].rolling(20).mean() if 'VT' in data.columns else None
+}
 
-    # Moving averages
-    ma = {
-        "SPY_20w": data["SPY"].rolling(100).mean().iloc[-1],
-        "QQQ_20w": data["QQQ"].rolling(100).mean().iloc[-1],
-        "SPY_200d": data["SPY"].rolling(200).mean().iloc[-1],
-        "QQQ_220d": data["QQQ"].rolling(220).mean().iloc[-1],
-        "IEF_50d": data["IEF"].rolling(50).mean().iloc[-1],
-        "VT_20d": data["VT"].rolling(20).mean().iloc[-1],
-    }
+latest_prices = data.iloc[-1]
+latest_ma = {k: ma.iloc[-1] if ma is not None else None for k, ma in moving_averages.items()}
 
-    # Signals
-    signals = {
-        "SPY_20w": latest["SPY"] > ma["SPY_20w"],
-        "QQQ_20w": latest["QQQ"] > ma["QQQ_20w"],
-        "SPY_200d": latest["SPY"] > ma["SPY_200d"],
-        "QQQ_220d": latest["QQQ"] > ma["QQQ_220d"],
-        "IEF_50d": latest["IEF"] > ma["IEF_50d"],
-        "VT_20d": latest["VT"] > ma["VT_20d"],
-    }
+# Signals
+signals = {k: latest_prices[k.split('_')[0]] > latest_ma[k] if latest_ma[k] is not None else False
+           for k in moving_averages.keys() if latest_ma[k] is not None}
 
-    # LS3.0 Implementation
-    spy_band = (ma["SPY_200d"]*0.9825, ma["SPY_200d"]*1.0175)
-    ief_band = (ma["IEF_50d"]*0.98, ma["IEF_50d"]*1.02)
-    sig1 = "On" if latest["SPY"] > spy_band[1] else "Off" if latest["SPY"] < spy_band[0] else "On"
-    sig2 = "On" if latest["IEF"] > ief_band[1] else "Off" if latest["IEF"] < ief_band[0] else "On"
-    ls3_impl = "3LUS" if sig1=="On" and sig2=="On" else "Cash"
+days_left = days_to_quarter_end(data.index[-1])
 
-    # Messages
-    ls3_impl_msg = f"**LS3.0 Impl.**\n- Signal1: {sig1}\n- Signal2: {sig2}\n- Positioning: {ls3_impl}"
-    ls3_msg = f"**LS3.0**\n- SPX: {'above' if signals['SPY_200d'] else 'below'} 200d MA\n- IEF: {'above' if signals['IEF_50d'] else 'below'} 50d MA\n- Positioning: {'3LUS' if signals['SPY_200d'] and signals['IEF_50d'] else '3TYL' if signals['IEF_50d'] else 'Cash'}"
-    ls2_msg = f"**LS2.0**\n- SPX: {'above' if signals['SPY_200d'] else 'below'} 200d MA\n- NDX: {'above' if signals['QQQ_220d'] else 'below'} 220d MA\n- IEF: {'above' if signals['IEF_50d'] else 'below'} 50d MA\n- Positioning: {', '.join([p for p in ['3LUS' if signals['SPY_200d'] else '', 'LQQ3' if signals['QQQ_220d'] else '', '3TYL' if signals['IEF_50d'] else '', 'Cash' if not any([signals['SPY_200d'],signals['QQQ_220d'],signals['IEF_50d']]) else ''] if p])}"
-    ls1_msg = f"**LS1.0**\n- SPX: {'above' if signals['SPY_20w'] else 'below'} 20w MA\n- NDX: {'above' if signals['QQQ_20w'] else 'below'} 20w MA\n- Positioning: {', '.join([p for p in ['3LUS' if signals['SPY_20w'] else '', 'LQQ3' if signals['QQQ_20w'] else '', 'Cash' if not any([signals['SPY_20w'],signals['QQQ_20w']]) else ''] if p])}"
-    vt_msg = f"**FTSE Global All Cap (VT)**\n- VT: {'above' if signals['VT_20d'] else 'below'} 20d MA ({ma['VT_20d']:.2f})\n- Price: {latest['VT']:.2f}"
+# Utility for emojis
+def signal_emoji(is_on):
+    return "✅ ON" if is_on else "❌ OFF"
 
-    # Final message
-    msg = f"📊 Trading Signals — {date_str}\nRun ID: {uuid.uuid4()}\nDays to Q-end: {days_left}\n\n{ls3_impl_msg}\n\n{ls3_msg}\n\n{ls2_msg}\n\n{ls1_msg}\n\n{vt_msg}"
-    send_to_ntfy(msg)
+def position_emoji(position):
+    mapping = {'3LUS':'🚀 3LUS', 'LQQ3':'🌐 LQQ3', '3TYL':'💵 3TYL', 'Cash':'💤 Cash'}
+    return mapping.get(position, position)
 
-if __name__ == "__main__":
-    main()
+# LS3.0 Implementation signals
+spy_200 = latest_ma['SPY_200d']
+spy_upper = spy_200 * 1.0175
+spy_lower = spy_200 * 0.9825
+
+ief_50 = latest_ma['IEF_50d']
+ief_upper = ief_50 * 1.02
+ief_lower = ief_50 * 0.98
+
+sig1 = "✅ ON" if latest_prices['SPY'] > spy_upper else "❌ OFF" if latest_prices['SPY'] < spy_lower else "⚪ ON"
+sig2 = "✅ ON" if latest_prices['IEF'] > ief_upper else "❌ OFF" if latest_prices['IEF'] < ief_lower else "⚪ ON"
+ls3_impl = "3LUS" if sig1=="✅ ON" and sig2=="✅ ON" else "Cash"
+
+# LS3.0 Overview
+ls3_message = f"""
+📊 LS3.0: The Last Dance
+------------------------
+SPX 200d MA: {'above' if signals['SPY_200d'] else 'below'}
+IEF 50d MA: {'above' if signals['IEF_50d'] else 'below'}
+Signal 1 (SPY ±1.75%): {sig1}
+Signal 2 (IEF ±2%): {sig2}
+Positioning: {position_emoji(ls3_impl)}
+"""
+
+# LS2.0 Overview
+ls2_positions = []
+if signals['SPY_200d']:
+    ls2_positions.append("3LUS")
+if signals['QQQ_220d']:
+    ls2_positions.append("LQQ3")
+if signals['IEF_50d']:
+    ls2_positions.append("3TYL")
+if not ls2_positions:
+    ls2_positions.append("Cash")
+
+ls2_message = f"""
+📊 LS2.0: The Challenger
+------------------------
+SPX 200d MA: {'above' if signals['SPY_200d'] else 'below'}
+NDX 220d MA: {'above' if signals['QQQ_220d'] else 'below'}
+IEF 50d MA: {'above' if signals['IEF_50d'] else 'below'}
+Positioning: {', '.join([position_emoji(p) for p in ls2_positions])}
+"""
+
+# LS1.0 Overview
+ls1_positions = []
+if signals['SPY_20w']:
+    ls1_positions.append("3LUS")
+if signals['QQQ_20w']:
+    ls1_positions.append("LQQ3")
+if not ls1_positions:
+    ls1_positions.append("Cash")
+
+ls1_message = f"""
+📊 LS1.0: The OG
+------------------------
+SPX 20w MA: {'above' if signals['SPY_20w'] else 'below'}
+NDX 20w MA: {'above' if signals['QQQ_20w'] else 'below'}
+Positioning: {', '.join([position_emoji(p) for p in ls1_positions])}
+"""
+
+# VT overview
+if 'VT' in data.columns and latest_ma['VT_20d'] is not None:
+    vt_status = "above" if signals['VT_20d'] else "below"
+    vt_message = f"""
+📊 FTSE Global All Cap (VT)
+---------------------------
+VT 20d MA: {vt_status} ({latest_ma['VT_20d']:.2f})
+Latest Price: {latest_prices['VT']:.2f}
+"""
+else:
+    vt_message = """
+📊 FTSE Global All Cap (VT)
+---------------------------
+VT: data unavailable
+"""
+
+# Compose full message
+full_message = "\n".join([ls3_message, ls2_message, ls1_message, vt_message, f"Days to quarter-end: {days_left}"])
+
+# Send
+send_to_ntfy(full_message)
+
+# Print for debug
+print(full_message)
